@@ -1,0 +1,17 @@
+[Unit]
+Description=Afterburn (Check In)
+Documentation=https://coreos.github.io/afterburn/
+ConditionKernelCommandLine=|ignition.platform.id=azure
+ConditionKernelCommandLine=|ignition.platform.id=azurestack
+After=network.target
+After=multi-user.target
+
+[Service]
+Environment=COREOS_METADATA_OPT_PROVIDER=--cmdline
+ExecStart=/usr/bin/coreos-metadata ${COREOS_METADATA_OPT_PROVIDER} --check-in
+Type=oneshot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+Alias=afterburn-checkin.service

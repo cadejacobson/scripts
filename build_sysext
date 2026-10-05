@@ -35,7 +35,7 @@ DEFINE_boolean generate_pkginfo "${FLAGS_FALSE}" \
   "Generate an additional squashfs '<sysext_name>_pkginfo.raw' with portage package meta-information (/var/db ...). Useful for creating sysext dependencies; see 'base_pkginfo' below."
 DEFINE_string base_pkginfo "" \
   "Colon-separated list of pkginfo squashfs paths / files generated via 'generate_pkginfo' to base this sysext on. The corresponding base sysexts are expected to be merged with the sysext generated."
-DEFINE_string compression "lz4hc" \
+DEFINE_string compression "none" \
   "Compression to use for sysext EROFS image. Options: 'lz4', 'lz4hc', 'zstd', or 'none'. Default is 'lz4hc'."
 DEFINE_string mkerofs_opts "" \
   "Additional mkfs.erofs options to pass via SYSTEMD_REPART_MKFS_OPTIONS_EROFS. If not specified, defaults are used based on compression type."

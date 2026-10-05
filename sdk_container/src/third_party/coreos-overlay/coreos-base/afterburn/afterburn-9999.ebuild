@@ -53,6 +53,9 @@ src_install() {
 
 	systemd_dounit "${FILESDIR}"/coreos-metadata.service
 	systemd_newunit "${FILESDIR}"/coreos-metadata-sshkeys.service coreos-metadata-sshkeys@.service
+
+	systemd_dounit "${FILESDIR}"/coreos-metadata-checkin.service
+    systemd_enable_service multi-user.target coreos-metadata-checkin.service
 }
 
 src_test() {
