@@ -1,8 +1,8 @@
 [Unit]
 Description=Afterburn (Check In)
 Documentation=https://coreos.github.io/afterburn/
-ConditionKernelCommandLine=|ignition.platform.id=azure
-ConditionKernelCommandLine=|ignition.platform.id=azurestack
+ConditionKernelCommandLine=|flatcar.oem.id=azure
+ConditionKernelCommandLine=|coreos.oem.id=azure
 After=network.target
 After=multi-user.target
 
