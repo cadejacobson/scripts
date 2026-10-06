@@ -251,7 +251,7 @@ if [[ "$FLAGS_generate_pkginfo" = "${FLAGS_TRUE}" ]] ; then
   mkdir -p "${BUILD_DIR}/img-pkginfo/var/db"
   cp -R "${BUILD_DIR}/${FLAGS_install_root_basename}/var/db/pkg" "${BUILD_DIR}/img-pkginfo/var/db/"
   mksquashfs "${BUILD_DIR}/img-pkginfo" "${BUILD_DIR}/${SYSEXT_ID}_pkginfo.raw" \
-              -noappend -xattrs-exclude '^btrfs.' -comp zstd -Xcompression-level 22 -b 512k
+              -noappend -xattrs-exclude '^btrfs.' -comp gzip -b 512k
 fi
 
 info "Writing ${SYSEXT_ID}_packages.txt"
