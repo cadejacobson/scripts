@@ -146,6 +146,65 @@ This step:
 
 **Build output:** Custom RPMs are added to `__build__/rpm-staging/`.
 
+#### Temporary systemd 255 journal backport
+
+ACL derives its systemd package from `SPECS/systemd/` in the Azure Linux checkout
+already used by [build.sh](../build.sh), rather than maintaining a separate copy
+of the complete upstream package. When `systemd` is selected in
+[packages.yaml](../packages.yaml), the build copies the ACL specs to a temporary
+build directory, imports Azure Linux's systemd spec and supporting files, and
+registers these checked-in upstream patches in order:
+
+1. [Close runtime journals before removing their directory](https://github.com/systemd/systemd/commit/163a0e6097b68f2699931a87c49b1c6a8903606e).
+2. [Also remove runtime journal directories with a different machine ID](https://github.com/systemd/systemd/commit/1b7aa998ae358d4af66d490d35ca448378650f60).
+
+The second patch fixes duplicate initramfs entries in `journalctl` when the
+initramfs and real root have different machine IDs: systemd 255 leaves the old
+runtime journal behind after copying its entries to persistent storage.
+
+[prepare.py](../SPECS/systemd/prepare.py) preserves Azure Linux's existing patches
+and source checksums, and appends `.acl1` to the RPM release (for example,
+`255-34.azl3.acl1`). The upstream checkout is not modified. Unexpected versions,
+patch-number collisions, and incompatible spec layouts fail the build rather
+than silently building an unpatched package. The existing image-build wrapper
+continues to remove locally built systemd-boot RPMs from staging so the
+Microsoft-signed bootloader is used.
+
+**Remove this workaround once Azure Linux upgrades to systemd 256 or newer:**
+the [upstream fix](https://github.com/systemd/systemd/commit/1b7aa998ae358d4af66d490d35ca448378650f60)
+is included there. Remove the `systemd` entry in `packages.yaml`, the preparation
+block and temporary-spec cleanup in `build.sh`, `SPECS/systemd/`, and its offline
+test. The version guard intentionally fails on systemd 256 to prompt this cleanup.
+
+Run the fast, offline packaging regression tests:
+
+```bash
+python3 acl/tests/test_prepare_systemd_spec.py
+```
+
+On the Linux build host, rebuild the custom RPMs and then the image:
+
+```bash
+./acl/build_rpm_image.sh --build-rpms
+./acl/build_rpm_image.sh --rebuild
+```
+
+The package base is the existing `__build__/rpms_build_dir/azurelinux` checkout;
+reusing sources does not automatically update it. Ensure it contains the intended
+Azure Linux revision before building. After booting the new image, verify the
+installed release and the journal handoff:
+
+```bash
+rpm -q systemd systemd-libs
+sudo journalctl --flush
+sudo journalctl -b --no-pager -o json-pretty --grep '^Linux version '
+```
+
+Expect the `.acl1` release and exactly one kernel version entry in the current
+boot. Test a fresh provisioned image where the initramfs and real-root machine
+IDs differ, and confirm the old initramfs machine-ID directory no longer remains
+under `/run/log/journal/` after the flush. Also verify Secure Boot if enabled.
+
 ### Phase 3: Build the Image
 
 Build the Flatcar production image using RPM package sources.

@@ -18,9 +18,14 @@ function log() {
 }
 
 SPECS_DIR="${ACL_DIR}/SPECS"
+PREPARED_SPECS_DIR=""
 
 function cleanup() {
     log "Cleaning up..."
+
+    if [[ -n "${PREPARED_SPECS_DIR}" ]]; then
+        rm -rf -- "${PREPARED_SPECS_DIR}"
+    fi
 
     if [[ -n "$LOG_PUBLISH_DIR" ]]; then
         publish_build_logs
@@ -170,6 +175,18 @@ if [[ ${#package_build_list[@]} -eq 0 ]]; then
 fi
 
 clone_azl3
+
+# Remove this override when Azure Linux upgrades to systemd 256 or newer.
+# https://github.com/systemd/systemd/commit/1b7aa998ae358d4af66d490d35ca448378650f60
+if [[ " ${package_build_list[*]} " == *" systemd "* ]]; then
+    PREPARED_SPECS_DIR="$(mktemp -d "${BUILD_DIR}/acl-specs.XXXXXX")"
+    cp -a "${SPECS_DIR}/." "${PREPARED_SPECS_DIR}/"
+    log "Preparing systemd 255 with ACL's upstream journald cleanup backports"
+    python3 "${SPECS_DIR}/systemd/prepare.py" \
+        "${BUILD_DIR}/azurelinux/SPECS/systemd" \
+        "${PREPARED_SPECS_DIR}/systemd"
+    SPECS_DIR="${PREPARED_SPECS_DIR}"
+fi
 
 build_specs "$SPECS_DIR"
 

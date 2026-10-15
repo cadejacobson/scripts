@@ -1,0 +1,111 @@
+From 1b7aa998ae358d4af66d490d35ca448378650f60 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sun, 3 Dec 2023 21:56:26 +0900
+Subject: [PATCH] journald: also remove runtime journal directories with a
+ different machine ID
+
+Otherwise, even if the journal files in the directories are flushed to
+the persistent storage, still they are opened by e.g. journalctl, and it
+may show duplicated entries.
+Also, the journal files may be flushed to the persistent storage more
+than once.
+---
+ src/journal/journald-server.c                | 16 ++++++++-
+ src/libsystemd/sd-journal/journal-internal.h |  1 +
+ src/libsystemd/sd-journal/sd-journal.c       | 35 ++++++++++++++++++++
+ 3 files changed, 51 insertions(+), 1 deletion(-)
+
+diff --git a/src/journal/journald-server.c b/src/journal/journald-server.c
+index d7c8095d7954..cfa4b5ffbfb9 100644
+--- a/src/journal/journald-server.c
++++ b/src/journal/journald-server.c
+@@ -1353,6 +1353,10 @@ int server_flush_to_var(Server *s, bool require_flag_file) {
+         if (s->system_journal)
+                 journal_file_post_change(s->system_journal);
+ 
++        /* Save parent directories of runtime journals before closing runtime journals. */
++        _cleanup_strv_free_ char **dirs = NULL;
++        (void) journal_get_directories(j, &dirs);
++
+         /* First, close all runtime journals opened in the above. */
+         sd_journal_close(j);
+ 
+@@ -1360,9 +1364,19 @@ int server_flush_to_var(Server *s, bool require_flag_file) {
+         s->runtime_journal = journal_file_offline_close(s->runtime_journal);
+ 
+         /* Remove the runtime directory if the all entries are successfully flushed to /var/. */
+-        if (r >= 0)
++        if (r >= 0) {
+                 (void) rm_rf(s->runtime_storage.path, REMOVE_ROOT);
+ 
++                /* The initrd may have a different machine ID from the host's one. Typically, that happens
++                 * when our tests running on qemu, as the host's initrd is picked as is without updating
++                 * the machine ID in the initrd with the one used in the image. Even in such the case, the
++                 * runtime journals in the subdirectory named with the initrd's machine ID are flushed to
++                 * the persistent journal. To make not the runtime journal flushed multiple times, let's
++                 * also remove the runtime directories. */
++                STRV_FOREACH(p, dirs)
++                        (void) rm_rf(*p, REMOVE_ROOT);
++        }
++
+         server_driver_message(s, 0, NULL,
+                               LOG_MESSAGE("Time spent on flushing to %s is %s for %u entries.",
+                                           s->system_storage.path,
+diff --git a/src/libsystemd/sd-journal/journal-internal.h b/src/libsystemd/sd-journal/journal-internal.h
+index 259aac847d66..85d5d32f9659 100644
+--- a/src/libsystemd/sd-journal/journal-internal.h
++++ b/src/libsystemd/sd-journal/journal-internal.h
+@@ -128,6 +128,7 @@ struct sd_journal {
+ 
+ char *journal_make_match_string(sd_journal *j);
+ void journal_print_header(sd_journal *j);
++int journal_get_directories(sd_journal *j, char ***ret);
+ 
+ #define JOURNAL_FOREACH_DATA_RETVAL(j, data, l, retval)                     \
+         for (sd_journal_restart_data(j); ((retval) = sd_journal_enumerate_data((j), &(data), &(l))) > 0; )
+diff --git a/src/libsystemd/sd-journal/sd-journal.c b/src/libsystemd/sd-journal/sd-journal.c
+index 6b9ff0a4ed88..6e33c06d634f 100644
+--- a/src/libsystemd/sd-journal/sd-journal.c
++++ b/src/libsystemd/sd-journal/sd-journal.c
+@@ -1494,6 +1494,41 @@ static int add_any_file(
+         return r;
+ }
+ 
++int journal_get_directories(sd_journal *j, char ***ret) {
++        _cleanup_strv_free_ char **paths = NULL;
++        JournalFile *f;
++        const char *p;
++        size_t n = SIZE_MAX;
++        int r;
++
++        assert(j);
++        assert(ret);
++
++        /* This returns parent directories of opened journal files. */
++
++        ORDERED_HASHMAP_FOREACH_KEY(f, p, j->files) {
++                _cleanup_free_ char *d = NULL;
++
++                /* Ignore paths generated from fd. */
++                if (path_startswith(p, "/proc/"))
++                        continue;
++
++                r = path_extract_directory(p, &d);
++                if (r < 0)
++                        return r;
++
++                if (path_strv_contains(paths, d))
++                        continue;
++
++                r = strv_extend_with_size(&paths, &n, d);
++                if (r < 0)
++                        return r;
++        }
++
++        *ret = TAKE_PTR(paths);
++        return 0;
++}
++
+ static int add_file_by_name(
+                 sd_journal *j,
+                 const char *prefix,
