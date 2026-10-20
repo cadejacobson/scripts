@@ -248,6 +248,23 @@ _dracut_patch_bootengine_modules() {
 _dracut_install_initramfs_assets() {
     local root_fs_dir="$1"
 
+    # Use the RPM's source-provided fragment service, but not its other initrd services.
+    local afterburn_module="${root_fs_dir}/usr/lib/dracut/modules.d/30afterburn"
+    local afterburn_fragment="${afterburn_module}/afterburn-ignition-fragment.service"
+    [[ -f "${afterburn_fragment}" ]] || die "afterburn-dracut lacks afterburn-ignition-fragment.service; rebuild RPMs from an Afterburn ref containing it."
+    info "RPM mode: Integrating Afterburn Ignition fragment generation"
+    sudo install -m 0755 \
+        "${BUILD_LIBRARY_DIR}/rpm/additional_files/dracut-acl-afterburn/module-setup.sh" \
+        "${afterburn_module}/module-setup.sh"
+    # Avoid normal boot dependencies; the Ignition wrapper needs /sysusr/usr.
+    # Start networking even when Ignition fetch skips an already-local config.
+    sudo sed -i \
+        -e '/^DefaultDependencies=/d' \
+        -e '/^\[Unit\]$/a DefaultDependencies=no\nRequiresMountsFor=/sysusr/usr/\nWants=systemd-networkd.service\nAfter=systemd-networkd.service' \
+        -e 's|/usr/bin/afterburn |/usr/bin/coreos-metadata |g' \
+        -e 's/ignition\.platform\.id=azure/flatcar.oem.id=azure/g' \
+        "${afterburn_fragment}"
+
     # Create sysroot-oem.mount unit matching Flatcar's diskless-generator behavior.
     # This unit is created but NOT added to initrd-root-fs.target.requires, so it
     # won't be automatically started. Instead, ignition-files.service has:
