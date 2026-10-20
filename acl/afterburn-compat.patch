@@ -1,0 +1,186 @@
+Restore the Azure Linux cl-legacy providers and Flatcar platform flags for
+Afterburn 5.11. Based on the toolkit's first two rust-afterburn patches.
+The hostname dependency is resolved into Cargo.lock before vendoring.
+
+diff --git a/Cargo.toml b/Cargo.toml
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -39,6 +39,10 @@
+ codegen-units = 1
+ 
++[features]
++cl-legacy = []
++
+ [dependencies]
++hostname = "=0.4.2"
+ anyhow = "1.0"
+ base64 = "0.23"
+ cfg-if = "1.0"
+diff --git a/src/metadata.rs b/src/metadata.rs
+--- a/src/metadata.rs
++++ b/src/metadata.rs
+@@ -38,6 +38,8 @@
+ use crate::providers::proxmoxve;
+ use crate::providers::scaleway::ScalewayProvider;
+ use crate::providers::upcloud::UpCloudProvider;
++#[cfg(feature = "cl-legacy")]
++use crate::providers::vagrant_virtualbox::VagrantVirtualboxProvider;
+ use crate::providers::vmware::VmwareProvider;
+ use crate::providers::vultr::VultrProvider;
+ 
+@@ -63,6 +65,10 @@
+         "cloudstack-configdrive" => box_result!(ConfigDrive::try_new()?),
+         "digitalocean" => box_result!(DigitalOceanProvider::try_new()?),
+         "exoscale" => box_result!(ExoscaleProvider::try_new()?),
++        #[cfg(feature = "cl-legacy")]
++        "ec2" => box_result!(AwsProvider::try_new()?),
++        #[cfg(feature = "cl-legacy")]
++        "gce" => box_result!(GcpProvider::try_new()?),
+         "gcp" => box_result!(GcpProvider::try_new()?),
+         "hetzner" => box_result!(HetznerProvider::try_new()?),
+         // IBM Cloud - VPC Generation 2.
+@@ -79,6 +85,8 @@
+         "proxmoxve" => proxmoxve::try_config_drive_else_leave(),
+         "scaleway" => box_result!(ScalewayProvider::try_new()?),
+         "upcloud" => box_result!(UpCloudProvider::try_new()?),
++        #[cfg(feature = "cl-legacy")]
++        "vagrant-virtualbox" => box_result!(VagrantVirtualboxProvider::new()),
+         "vmware" => box_result!(VmwareProvider::try_new()?),
+         "vultr" => box_result!(VultrProvider::try_new()?),
+         _ => bail!("unknown provider '{}'", provider),
+diff --git a/src/providers/mod.rs b/src/providers/mod.rs
+--- a/src/providers/mod.rs
++++ b/src/providers/mod.rs
+@@ -44,6 +44,8 @@
+ pub mod proxmoxve;
+ pub mod scaleway;
+ pub mod upcloud;
++#[cfg(feature = "cl-legacy")]
++pub mod vagrant_virtualbox;
+ pub mod vmware;
+ pub mod vultr;
+ 
+diff --git a/src/providers/vagrant_virtualbox/mod.rs b/src/providers/vagrant_virtualbox/mod.rs
+new file mode 100644
+--- /dev/null
++++ b/src/providers/vagrant_virtualbox/mod.rs
+@@ -0,0 +1,77 @@
++// Copyright 2017 CoreOS, Inc.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++//! vagrant/virtualbox metadata fetcher
++
++use std::collections::HashMap;
++use std::net::IpAddr;
++use std::thread;
++use std::time::Duration;
++
++use anyhow::{anyhow, Context, Result};
++use slog_scope::info;
++
++use crate::providers::MetadataProvider;
++
++#[derive(Clone, Copy, Debug)]
++pub struct VagrantVirtualboxProvider;
++
++impl VagrantVirtualboxProvider {
++    pub fn new() -> Self {
++        Self
++    }
++
++    fn get_ip() -> Result<String> {
++        for _ in 0..30 {
++            if let Some(iface) = Self::find_eth1() {
++                for address in iface.ips {
++                    if let IpAddr::V4(address) = address.ip() {
++                        return Ok(address.to_string());
++                    }
++                }
++            }
++            info!("eth1 not found or is lacking an ipv4 address; waiting 2 seconds");
++            thread::sleep(Duration::from_secs(2));
++        }
++        Err(anyhow!("eth1 was not found!"))
++    }
++
++    fn find_eth1() -> Option<pnet_datalink::NetworkInterface> {
++        pnet_datalink::interfaces()
++            .into_iter()
++            .find(|iface| iface.name == "eth1")
++    }
++
++    fn system_hostname() -> Result<String> {
++        Ok(hostname::get()
++            .context("unable to get hostname")?
++            .to_string_lossy()
++            .into_owned())
++    }
++}
++
++impl MetadataProvider for VagrantVirtualboxProvider {
++    fn attributes(&self) -> Result<HashMap<String, String>> {
++        Ok(HashMap::from([
++            (
++                "VAGRANT_VIRTUALBOX_HOSTNAME".to_string(),
++                Self::system_hostname()?,
++            ),
++            (
++                "VAGRANT_VIRTUALBOX_PRIVATE_IPV4".to_string(),
++                Self::get_ip()?,
++            ),
++        ]))
++    }
++}
+diff --git a/src/util/cmdline.rs b/src/util/cmdline.rs
+--- a/src/util/cmdline.rs
++++ b/src/util/cmdline.rs
+@@ -23,7 +23,10 @@
+ use slog_scope::trace;
+ 
+ /// Platform key.
+-const CMDLINE_PLATFORM_FLAG: &str = "ignition.platform.id";
++#[cfg(not(feature = "cl-legacy"))]
++const CMDLINE_PLATFORM_FLAGS: &[&str] = &["ignition.platform.id"];
++#[cfg(feature = "cl-legacy")]
++const CMDLINE_PLATFORM_FLAGS: &[&str] = &["flatcar.oem.id", "coreos.oem.id"];
+ 
+ /// Get platform value from cmdline file.
+ pub fn get_platform(fpath: &str) -> Result<String> {
+@@ -32,17 +35,17 @@
+     let content = std::fs::read_to_string(fpath)
+         .with_context(|| format!("Failed to read cmdline file ({fpath})"))?;
+ 
+-    match find_flag_value(CMDLINE_PLATFORM_FLAG, &content) {
+-        Some(platform) => {
+-            trace!("found '{}' flag: {}", CMDLINE_PLATFORM_FLAG, platform);
+-            Ok(platform)
++    for flag in CMDLINE_PLATFORM_FLAGS {
++        if let Some(platform) = find_flag_value(flag, &content) {
++            trace!("found '{}' flag: {}", flag, platform);
++            return Ok(platform);
+         }
+-        None => bail!(
+-            "Couldn't find flag '{}' in cmdline file ({})",
+-            CMDLINE_PLATFORM_FLAG,
+-            fpath
+-        ),
+     }
++    bail!(
++        "Couldn't find one of the flags '{:?}' in cmdline file ({})",
++        CMDLINE_PLATFORM_FLAGS,
++        fpath
++    )
+ }
+ 
+ /// Check whether kernel cmdline file contains flags for network configuration.
