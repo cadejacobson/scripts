@@ -684,11 +684,24 @@ _mask_core_sshkeys_rpm() {
     # Phase 3: coreos-metadata-sshkeys@core.service writes SSH public keys
     # from Azure IMDS into ~core/.ssh/authorized_keys. With core fully inert
     # (/sbin/nologin, no sudoers), injecting keys is pointless and leaves a
-    # stale authorized_keys file. The admin user's keys are handled by
-    # WALinuxAgent. Masking (symlink to /dev/null) takes precedence over
+    # stale authorized_keys file. Admin-user keys must be provided through
+    # Ignition. Masking (symlink to /dev/null) takes precedence over
     # the DefaultInstance=core enable symlink created by %systemd_post.
     info "RPM mode: Masking coreos-metadata-sshkeys@core.service (Phase 3)"
     sudo ln -sfT /dev/null "${root_fs_dir}/etc/systemd/system/coreos-metadata-sshkeys@core.service"
+}
+
+# Keep the agent stopped even when the Azure sysext exposes its service.
+_mask_waagent_rpm() {
+    local root_fs_dir="$1"
+
+    info "RPM mode: Masking waagent.service and its sysext activation drop-in"
+    sudo mkdir -p "${root_fs_dir}/etc/systemd/system/multi-user.target.d" \
+        || die "Failed to create the waagent mask directory"
+    sudo ln -sfT /dev/null "${root_fs_dir}/etc/systemd/system/waagent.service" \
+        || die "Failed to mask waagent.service"
+    sudo ln -sfT /dev/null "${root_fs_dir}/etc/systemd/system/multi-user.target.d/10-waagent-sysext.conf" \
+        || die "Failed to mask the waagent sysext activation drop-in"
 }
 
 # ── Remove Flatcar components not used by ACL ────────────────────────────────
@@ -1352,6 +1365,7 @@ finish_image_post_tmpfiles_rpm() {
     _configure_cis_hardening_rpm "${root_fs_dir}"
     _generate_hwdb_rpm "${root_fs_dir}"
     _mask_core_sshkeys_rpm "${root_fs_dir}"
+    _mask_waagent_rpm "${root_fs_dir}"
 }
 
 finish_image_backup_etc_rpm() {

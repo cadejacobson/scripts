@@ -78,6 +78,11 @@ cp .cargo/acl-vendor.toml .cargo/config.toml
 specs="$work/specs/rust-afterburn"
 template="$toolkit/../SPECS/rust-afterburn"
 cp "$template/"*.service "$specs/"
+
+# Keep the source's per-boot check-in unit, adapted to ACL's binary and cmdline.
+sed -e 's|/usr/bin/afterburn |/usr/bin/coreos-metadata |g' \
+    -e 's/ignition\.platform\.id=/flatcar.oem.id=/g' \
+    systemd/afterburn-checkin.service > "$specs/afterburn-checkin.service"
 mv "$work/source" "$work/afterburn-$version"
 tar -czf "$specs/rust-afterburn-$version.tar.gz" --exclude="afterburn-$version/vendor" -C "$work" "afterburn-$version"
 tar -czf "$specs/afterburn-$version-azlcustomvendor.tar.gz" -C "$work/afterburn-$version" vendor
@@ -88,6 +93,7 @@ sed -E \
     -e "s/^Version:.*/Version:        $version/" \
     -e "s/^Release:.*/Release:        1.acl.${revision:0:12}%{?dist}/" \
     -e 's|^Source0:.*|Source0:        %{name}-%{version}.tar.gz|' \
+    -e '/^Source3:/a Source4:        afterburn-checkin.service' \
     -e '/^Patch[0-9]+:/d' \
     -e '/^%bcond_without check$/d' \
     -e '/^%if %\{with check\}/,/^%endif$/d' \
@@ -95,6 +101,13 @@ sed -E \
     -e '/^BuildRequires:  cargo/a BuildRequires:  rust >= '"$rust_version" \
     -e '/^%build/a export CARGO_PROFILE_RELEASE_STRIP=true CARGO_PROFILE_RELEASE_DEBUG=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1' \
     -e 's/cargo build /cargo build --locked /' \
+    -e '/^install .*%\{SOURCE2\}/a\
+install -D -m 0644 %{SOURCE4} %{buildroot}%{_unitdir}/afterburn-checkin.service\
+mkdir -p %{buildroot}%{_unitdir}/multi-user.target.wants\
+ln -s ../afterburn-checkin.service %{buildroot}%{_unitdir}/multi-user.target.wants/afterburn-checkin.service' \
+    -e '/^%\{_unitdir\}\/coreos-metadata\.service$/a\
+%{_unitdir}/afterburn-checkin.service\
+%{_unitdir}/multi-user.target.wants/afterburn-checkin.service' \
     "$template/rust-afterburn.spec" > "$specs/rust-afterburn.spec"
 # Record source hashes in the toolkit's expected signatures format.
 (

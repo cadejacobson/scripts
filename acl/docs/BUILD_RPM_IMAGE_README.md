@@ -149,6 +149,49 @@ This step:
 
 **Build output:** Custom RPMs are added to `__build__/rpm-staging/`.
 
+#### Afterburn check-in
+
+`./prepare_afterburn_rpm.sh` includes the source's `afterburn-checkin.service` in
+the custom RPM and enables it through a `/usr/lib/systemd/system/multi-user.target.wants/`
+symlink. It uses ACL's `coreos-metadata` executable and `flatcar.oem.id` platform
+flags, retaining the source's supported-platform conditions and boot ordering.
+Unlike the initramfs Ignition-fragment service, check-in runs on the real root
+each boot. Rebuild the custom RPMs, then the image without `--clean`, to include it.
+
+#### Azure Linux Agent disabled
+
+ACL masks `waagent.service` (the `WALinuxAgent` package) and its
+`multi-user.target.d/10-waagent-sysext.conf` activation drop-in during image
+preparation. The package remains installed, but neither boot enablement nor the
+Azure sysext can start the service. Agent-based provisioning and Azure VM
+extensions are unavailable; provide users and SSH keys through Ignition instead.
+Afterburn check-in and Ignition fragment generation remain enabled.
+Rebuild the image with `./acl/build_rpm_image.sh --rebuild` to apply this change.
+
+#### Build local upstream Ignition
+
+```bash
+./prepare_ignition_rpm.sh                      # ~/ignition, committed HEAD
+./prepare_ignition_rpm.sh ~/ignition my-ref     # Local branch, tag, or commit
+./acl/build_rpm_image.sh --rebuild             # Do not use --clean
+```
+
+This opt-in helper builds upstream Ignition using Azure Linux's `ignition-flatcar`
+packaging and stages that package in place of ACL's older version. Existing ACL
+bootengine/dracut integration is retained; upstream dracut files are not installed.
+It deliberately does **not** carry the old Flatcar patches: use modern Ignition v3
+JSON or supported Butane YAML, not legacy Ignition v1/v2 configs, OEM URLs, or
+`flatcar.config.url`/`coreos.config.url` aliases. Use `ignition.config.url` instead.
+
+Only committed source and its committed vendor tree are used. The latest released
+version in the source's release notes supplies the RPM base version (currently
+2.28.0); the commit hash identifies the exact build in the release and `--version`
+output, including any post-release changes. Go must satisfy the source's `go.mod`
+(currently 1.25 or newer). Use the custom RPM host prerequisites above plus `git`,
+`make`, and `jq`. `--prepare-only` generates inputs without sudo or RPM compilation.
+Inputs, build output, and replaced RPMs remain in the printed `__build__/ignition.*`
+directory. No tests run; image-build and first-boot validation are separate.
+
 **Compression Failure Tip**
 
 Some distros (including WSL) may not have the default `zstd` support causing
