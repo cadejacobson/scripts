@@ -8,6 +8,14 @@ if [[ -f "${rootfs}/etc/waagent.conf" ]]; then
     mv "${rootfs}/etc/waagent.conf" "${rootfs}/usr/lib/waagent/waagent.conf"
 fi
 
+# Let Ignition provision the machine while retaining the agent and extensions.
+if ! grep -q '^Provisioning\.Agent=' "${rootfs}/usr/lib/waagent/waagent.conf"; then
+    echo "ERROR: missing Provisioning.Agent in waagent.conf" >&2
+    exit 1
+fi
+sed -i 's/^Provisioning\.Agent=.*/Provisioning.Agent=disabled/' \
+    "${rootfs}/usr/lib/waagent/waagent.conf"
+
 # Patch waagent service file by removing ConditionPathExists line
 if [[ -f "${rootfs}/usr/lib/systemd/system/waagent.service" ]]; then
     sed -i \

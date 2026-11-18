@@ -158,15 +158,19 @@ flags, retaining the source's supported-platform conditions and boot ordering.
 Unlike the initramfs Ignition-fragment service, check-in runs on the real root
 each boot. Rebuild the custom RPMs, then the image without `--clean`, to include it.
 
-#### Azure Linux Agent disabled
+#### Azure Linux Agent provisioning disabled
 
-ACL masks `waagent.service` (the `WALinuxAgent` package) and its
-`multi-user.target.d/10-waagent-sysext.conf` activation drop-in during image
-preparation. The package remains installed, but neither boot enablement nor the
-Azure sysext can start the service. Agent-based provisioning and Azure VM
-extensions are unavailable; provide users and SSH keys through Ignition instead.
-Afterburn check-in and Ignition fragment generation remain enabled.
-Rebuild the image with `./acl/build_rpm_image.sh --rebuild` to apply this change.
+ACL sets `Provisioning.Agent=disabled` in the Azure sysext's
+`/usr/lib/waagent/waagent.conf`, used through `/etc/waagent.conf` when no local
+config already exists. This disables agent-based provisioning, not
+`waagent.service`: the agent and Azure VM extensions remain enabled.
+Provide users and SSH keys through Ignition; Afterburn check-in and Ignition
+fragment generation remain enabled.
+
+Rebuild the image and its `oem-azure` sysext to apply this change. Existing local
+`/etc/waagent.conf` overrides must be updated separately. Images previously built
+with the service masks also need those masks removed from `waagent.service` and
+`multi-user.target.d/10-waagent-sysext.conf` before the agent can start.
 
 #### Build local upstream Ignition
 

@@ -691,19 +691,6 @@ _mask_core_sshkeys_rpm() {
     sudo ln -sfT /dev/null "${root_fs_dir}/etc/systemd/system/coreos-metadata-sshkeys@core.service"
 }
 
-# Keep the agent stopped even when the Azure sysext exposes its service.
-_mask_waagent_rpm() {
-    local root_fs_dir="$1"
-
-    info "RPM mode: Masking waagent.service and its sysext activation drop-in"
-    sudo mkdir -p "${root_fs_dir}/etc/systemd/system/multi-user.target.d" \
-        || die "Failed to create the waagent mask directory"
-    sudo ln -sfT /dev/null "${root_fs_dir}/etc/systemd/system/waagent.service" \
-        || die "Failed to mask waagent.service"
-    sudo ln -sfT /dev/null "${root_fs_dir}/etc/systemd/system/multi-user.target.d/10-waagent-sysext.conf" \
-        || die "Failed to mask the waagent sysext activation drop-in"
-}
-
 # ── Remove Flatcar components not used by ACL ────────────────────────────────
 _remove_unused_flatcar_components_rpm() {
     local root_fs_dir="$1"
@@ -1365,7 +1352,6 @@ finish_image_post_tmpfiles_rpm() {
     _configure_cis_hardening_rpm "${root_fs_dir}"
     _generate_hwdb_rpm "${root_fs_dir}"
     _mask_core_sshkeys_rpm "${root_fs_dir}"
-    _mask_waagent_rpm "${root_fs_dir}"
 }
 
 finish_image_backup_etc_rpm() {
